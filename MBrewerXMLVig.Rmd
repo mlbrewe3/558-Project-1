@@ -1,0 +1,159 @@
+---
+title: "Mathan Brewer XML Vignette"
+author: "Mathan Brewer"
+date: "10/14/2019"
+output: 
+ html_document:
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(haven)
+library(knitr)
+library(readr)
+library(dplyr)
+library(tinytex)
+library(readxl)
+library(tidytext)
+library(ggplot2)
+library(DT)
+library(formattable)
+library(parallel)
+library(XML)
+SAT<-xmlToDataFrame("rows.xml")
+SAT$test_takers_2012<-as.numeric(SAT$test_takers_2012)
+SAT$test_takers_2013<-as.numeric(SAT$test_takers_2013)
+SAT$test_takers_change<-as.numeric(SAT$test_takers_change)
+SAT$participation_rate_estimate_2012<-as.numeric(SAT$participation_rate_estimate_2012)
+SAT$participation_rate_estimate_2013<-as.numeric(SAT$participation_rate_estimate_2013)
+SAT$participation_rate_estimate_change<-as.numeric(SAT$participation_rate_estimate_change)
+SAT$percent_meeting_benchmark_2012<-as.numeric(SAT$percent_meeting_benchmark_2012)
+SAT$percent_meeting_benchmark_2013<-as.numeric(SAT$percent_meeting_benchmark_2013)
+SAT$percent_meeting_benchmark_change<-as.numeric(SAT$percent_meeting_benchmark_change)
+```
+
+#Background
+
+XML stands for eXtensible Markup Language, and it is a markup language for structured data that was designed to store data and transfer data.  It takes multiple peices on an observation and stores it in what is called a node.  We can use multiple nodes to create a set of data.  This allows the data to be stored in a simplier manner, so that it is more efficient in terms of reading, writing and querying.  For this example we will be looking at SAT data from data.gov found at [this website](https://data.ct.gov/api/views/kbxi-4ia7/rows.xml?accessType=DOWNLOAD).  This dataset contains information about differences in SAT score and individuals who took it from 2012 to 2013  in Connecicut.
+
+#Data and Packages
+
+##JSON Structure
+
+FIrst we will look at the structure of the XML data.  Below is the XML code for the first observation or node.  This first thing you will notice is the <row>, this is the start of our node, and it is telling us that is the beginnig of a new node or row for our case.  At the end of this section you will see </row>, which signifies that this observation has ended.  The next will start with the same <row>.  After that we havee a bit of information about this observation that gives us a link to some resources for it.  After that is where our tags or variables start.  Again these tags are within <> and it is giving us a name for the variable, for this first variable <district_number>.  Notice that this variable is one string of characters with no space, this is a rule for the tags.  In between the starting tag and ending tag is our value of our variable, so for this case we see that for the first observation that the district number is 26111.  Then right after our value is </district_number>.  Our next observation starts on the next line with the same rule.  This continues until our data is complete for the first observation.  After that you will see the </row> telling us to go to the next observation, and the process starts again.  
+
+<ba>
+
+<row>
+  <row _id="row-y4r3~beu6-eki8" _uuid="00000000-0000-0000-7B7D-21B454AFB436" _position="0"                  _address="https://data.ct.gov/resource/kbxi-4ia7/row-y4r3~beu6-eki8"> 
+    <district_number>26111</district_number>
+    <district>Ansonia</district>
+    <school>Ansonia High School</school>
+    <test_takers_2012>118</test_takers_2012>
+    <test_takers_2013>104</test_takers_2013>
+    <test_takers_change>-12</test_takers_change>
+    <participation_rate_estimate_2012>67</participation_rate_estimate_2012>
+    <participation_rate_estimate_2013>61</participation_rate_estimate_2013>
+    <participation_rate_estimate_change>-6</participation_rate_estimate_change>
+    <percent_meeting_benchmark_2012>18</percent_meeting_benchmark_2012>
+    <percent_meeting_benchmark_2013>18</percent_meeting_benchmark_2013>
+    <percent_meeting_benchmark_change>0</percent_meeting_benchmark_change>
+</row>
+
+##Read Into R
+
+To begin reading thisTo begin reading this data into R we first need to install a package to deal with this type of data.  I choose to use "XML" to read in this data into R.  I used this package because it seemed to be the easiest to read in the data as a data frame using and it gives us the ability to parse or segmetns out the nodes look at one or more of the mrouped together.    I used the xmlToDataFrame to read the data in.  If we wanted to parse the data we could have used xml parse.  
+
+```{r, eval = FALSE, echo = TRUE}
+install.packages("XML")
+library(XML)
+SAT<-xmlToDataFrame("rows.xml")
+```
+
+Below are the first ten observations of the data frame.  
+
+```{r, eval = TRUE, echo = TRUE}
+head(SAT, n =10)
+```
+
+For this data lets do a few things to it to make it easier for us to understand what is going on with these school.  What I am going to do is create a variable that tells us if a school had met expected level of growth, so we are going to create a variable with levels based on percent meeting benchmark.  We will have anything less than -2.5 to be "did not met growth", between -2.5 and 2.5 as " met growth", and finally anything greater that 2.5 will "exceeded growth".
+
+```{r, eval=TRUE, echo = TRUE}
+SAT<-mutate(SAT, level_of_growth = 
+ifelse(percent_meeting_benchmark_change < -2.5, "Did not met growth", 
+ifelse(percent_meeting_benchmark_change >= -2.5 & percent_meeting_benchmark_change <=2.5, "Met growth",
+ifelse(percent_meeting_benchmark_change > 2.5, "Exceeded growth", 0))))
+head(SAT, n = 10)
+```
+
+We can now see this column in.  Now meeting expected growth is great, but when your scores are already high it is going to be harder to continue growing, so let create a fuction to give a school a numeric score based on the value of the percent change and percent meeting in 2013.  
+
+```{r, eval=TRUE, echo=TRUE}
+schoolgrade<- function(percent_meeting_2013, percent_meeting_change){
+            newvalue<-percent_meeting_2013*.5+percent_meeting_change*.5
+            return((newvalue/60)*100)
+}
+```
+
+Now we can start to compare schools with different vaules for percent meeting and percent change.  Look at the 1st observation and the 4th observation from the table about, if we go based just on their growth we may say that the 1st school is performing better, but lets us our new formula.  
+
+```{r, eval=TRUE, echo=TRUE}
+schoolgrade(18,0)
+schoolgrade(49,-2)
+```
+
+We can now compare these schools based on both variables, and we see a different story.  
+
+#Data Analysis
+
+##Tables
+
+We are first going to look at the number of school in each growth level to get a general idea where they are at.  
+
+```{r, eval=TRUE, echo = TRUE}
+ftable(SAT$level_of_growth)
+```
+
+It is good to see that many of the school have exceeded growth.  Let's look at this data again by district to start getting some more insight.  
+
+```{r, eval = TRUE, echo = TRUE}
+table(SAT$district,SAT$level_of_growth)
+bigthree<-filter(SAT, SAT$district %in% c("Hartford", "New Haven", "Connecticut Technical High School System"))
+levels <- ggplot(data = bigthree, aes(x = level_of_growth), na.rm = TRUE)
+levels + geom_bar(aes( fill = as.factor(district)), na.rm = TRUE, position = "dodge") + xlab("Levels") +
+  labs( fill = " ")
+```
+
+##Big Three
+
+Since a lot of the school districts only have one or two school in them, we will take a look at the three largest Hartford, New Haven and Connecticut Technical High School System.  
+
+```{r, eval = TRUE, echo = TRUE}
+bigthree<-filter(SAT, SAT$district %in% c("Hartford", "New Haven", "Connecticut Technical High School System"))
+table(bigthree$district, bigthree$level_of_growth)
+```
+
+Well these three all seem at a glance, but New Haven and Hartford are not too far from each other so we are going to compare these three more to maybe get an idea of which of these maybe the best.  The first thing we are going to look at is a scatterplot to see if maybe some of these schools are already at a higher level and are struggling to get muchh growth.  
+
+```{r, eval=TRUE, echo=TRUE, warning=FALSE}
+changevs2013 <- ggplot(bigthree, aes(x= percent_meeting_benchmark_change, y = percent_meeting_benchmark_2013, colour = factor(district)))
+
+changevs2013 + geom_point(aes(colour = factor(district)))+labs( title = "Change against 2013 scores")+geom_smooth(se = FALSE, method = lm)+geom_smooth(method = lm)
+```
+
+All of school have a positive slope, but it looks as if Hartford may have the best growth.  Lets at a few other thinngs between these.  We are going to dispay the percent change as box plots to get and idea of where they lie.
+
+```{r, eval = TRUE, echo = TRUE, warning=FALSE}
+changevalue <- ggplot(bigthree, aes(x = district, y = percent_meeting_benchmark_change))
+changevalue + geom_boxplot() + geom_point(aes(colour = district))+labs( title = "Boxplot for Percent Change in Meeting Benchmark")
+```
+
+Again it looks like Hartford is ahead, but I am going to leave you with a few values, about the percent change in students meeting benchmarks, for you to dig further and decide for yourself which district you think it the best.  
+
+```{r, eval=TRUE, echo = TRUE}
+summarize(group_by(bigthree, district), mean = mean(percent_meeting_benchmark_change, na.rm = TRUE), StdDev= sd(percent_meeting_benchmark_change, na.rm = TRUE))
+```
